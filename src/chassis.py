@@ -1,6 +1,7 @@
 import csv
 import time
 import os
+import json
 import threading
 from datetime import datetime
 
@@ -204,8 +205,8 @@ class ChassisController:
                 ir2_raw = self.read_sharp_ir_sensor_L()
 
                 # Convert raw values to centimeters
-                irR_cm = self.adc_to_cm(ir1_raw,0, self.prev_irR_cm)
-                irL_cm = self.adc_to_cm(ir2_raw,0, self.prev_irL_cm)
+                irR_cm = self.adc_to_cm(ir1_raw, 0, self.prev_irR_cm)
+                irL_cm = self.adc_to_cm(ir2_raw, 0, self.prev_irL_cm)
 
                 # Update previous distances
                 self.prev_irR_cm = irR_cm
@@ -257,7 +258,7 @@ class ChassisController:
     # Part 3: Motion Control Functions
     # (Remains identical to your original code)
     # =========================================================
-    
+
     def move_forward(self, distance=None, speed=None):
         if distance is None:
             distance = self.default_distance
@@ -279,46 +280,46 @@ class ChassisController:
         ky = 0.2
         max_y = 0.05  # ปรับลดลงเพื่อไม่ให้หุ่นสะบัดสไลด์เร็วเกินไป
         alpha = 0.2
-        
+
         # ใช้ลูปเดียว: เช็คเวลาเดิน ควบคู่กับเช็คเซนเซอร์ตลอดทาง
         while (time.time() - start_time) < travel_time:
-            
+
             # 1. เช็คเบรกฉุกเฉิน (ToF)
             front_dist = self.current_tof_dist_mm
             if 0 < front_dist <= stop_limit_mm:
                 print(f"!!! [เบรกฉุกเฉิน] เจอสิ่งกีดขวางระยะ {front_dist}mm หยุดการทำงาน !!!")
                 self.ep_chassis.drive_speed(x=0, y=0, z=0)
                 time.sleep(0.5)
-                return True # แจ้งกลับไปว่าเดินไม่สำเร็จ
+                return True  # แจ้งกลับไปว่าเดินไม่สำเร็จ
 
             # 2. อ่านค่า IR เพื่อสไลด์กึ่งกลาง
             irR_cm = self.prev_irR_cm
             irL_cm = self.prev_irL_cm
-            
+
             if irR_cm > 25:
                 irR_cm = 17.5
             if irL_cm > 25:
                 irL_cm = 17.5
-            
+
             target_y = (irR_cm - irL_cm) * ky
-            
+
             # ป้องกันไม่ให้สไลด์เร็วเกินไป
             target_y = max(-max_y, min(max_y, target_y))
-            
+
             # ทำ Smoothing เพื่อให้สไลด์เนียนขึ้น ไม่กระตุก
             current_y = (alpha * target_y) + ((1 - alpha) * current_y)
-            
+
             # 3. สั่งหุ่นยนต์ให้เดินหน้าพร้อมสไลด์ข้าง (อัปเดตแบบ Real-time)
             self.ep_chassis.drive_speed(x=speed, y=current_y, z=0)
-            
+
             # หน่วงเวลาสั้นๆ ก่อนคำนวณรอบถัดไป
             time.sleep(0.1)
-            
+
         # เมื่อครบเวลาเดิน (ถึงเป้าหมาย 1 ช่อง) สั่งให้หุ่นหยุดนิ่ง
         self.ep_chassis.drive_speed(x=0, y=0, z=0)
         time.sleep(0.5)
-        return True # เดินสำเร็จถึงเป้าหมาย
-    
+        return True  # เดินสำเร็จถึงเป้าหมาย
+
     def auto_drive_general(self, forward_speed=0.3, stop_threshold_mm=205):
         """
         ฟังก์ชันวิ่งรักษากึ่งกลาง พร้อมระบบ Safety Check กันชน
@@ -327,57 +328,56 @@ class ChassisController:
         ky = 0.3
         max_y = 0.05
         alpha = 0.2
-        SIDE_OPEN_CM = 20.0  
+        SIDE_OPEN_CM = 20.0
 
         while True:
             front_dist = self.current_tof_dist_mm
             left_dist = self.prev_irL_cm
             right_dist = self.prev_irR_cm
-            
+
             # 1. Safety Check: เช็คระยะกำแพงหน้าก่อนเสมอ (เบรกที่ 30 ซม.)
             if 0 < front_dist <= stop_threshold_mm:
                 self.ep_chassis.drive_speed(x=0, y=0, z=0)
                 break
-                
+
             # 2. เจอทางแยก (ซ้ายหรือขวาเปิดโล่ง)
             if right_dist > SIDE_OPEN_CM or left_dist > SIDE_OPEN_CM:
                 self.ep_chassis.drive_speed(x=0, y=0, z=0)
-                
-                # ดันหุ่นไปข้างหน้า 15 ซม. เพื่อตั้งลำเลี้ยว 
+
+                # ดันหุ่นไปข้างหน้า 15 ซม. เพื่อตั้งลำเลี้ยว
                 # *เซฟตี้: ทำได้ก็ต่อเมื่อข้างหน้าต้องมีที่ว่างมากกว่าระยะเบรก + 15 ซม.*
                 if front_dist > (stop_threshold_mm + 150):
-                    self.move_forward(0.15, speed=0.1) 
+                    self.move_forward(0.15, speed=0.1)
                 break
 
             irR_cm = self.prev_irR_cm
             irL_cm = self.prev_irL_cm
-                
+
             if irR_cm > 25:
                 irR_cm = 17.5
             if irL_cm > 25:
-                irL_cm =17.5
+                irL_cm = 17.5
 
             target_y = (irR_cm - irL_cm) * ky
 
-                # ป้องกันไม่ให้สไลด์เร็วเกินไป
+            # ป้องกันไม่ให้สไลด์เร็วเกินไป
             target_y = max(-max_y, min(max_y, target_y))
-                
-                # ทำ Smoothing เพื่อให้สไลด์เนียนขึ้น ไม่กระตุก
+
+            # ทำ Smoothing เพื่อให้สไลด์เนียนขึ้น ไม่กระตุก
             current_y = (alpha * target_y) + ((1 - alpha) * current_y)
 
-                # 4. สั่งหุ่นยนต์เดินหน้า (x) พร้อมสไลด์ข้าง (y) โดยไม่มีการหมุน (z=0)
-                # **ข้อควรระวัง:** ทิศทาง +y หรือ -y ขึ้นอยู่กับระบบของหุ่น
-                # ถ้าหุ่นสไลด์ผิดทาง (ยิ่งเข้าใกล้กำแพงยิ่งสไลด์ชน) ให้แก้สมการเป็น target_y = (irL_cm - irR_cm) * ky
+            # 4. สั่งหุ่นยนต์เดินหน้า (x) พร้อมสไลด์ข้าง (y) โดยไม่มีการหมุน (z=0)
             self.ep_chassis.drive_speed(x=forward_speed, y=current_y, z=0)
-                
-                # Delay
+
+            # Delay
             time.sleep(0.01)
 
     def explore_and_map_all(self):
-        """อัลกอริทึมทำแผนที่ 4x4 Grid (DFS) สำรวจ 100%
+        """อัลกอริทึมทำแผนที่แบบ Grid (DFS) สำรวจ 100% (SLAM: unknown map, self-localize,
+        build occupancy grid จาก ToF + Sharp IR, ไม่พึ่งพาแผนที่ที่รู้ล่วงหน้า)
 
         พร้อมบันทึกประวัติการเดินและระยะเซนเซอร์ลงไฟล์ .csv โดยใช้ config จาก
-        settings.yaml
+        settings.yaml และสรุปรายงาน "จุดเริ่มต้น / จุดจบ" ตามที่โจทย์ต้องการ
         """
         print("--- เริ่มการสร้างแผนที่แบบสมบูรณ์ (DFS Mapping) ---")
 
@@ -448,13 +448,14 @@ class ChassisController:
         stack = []
 
         x, y = 0, 0
+        start_x, start_y = x, y  # <-- จุดเริ่มต้นภารกิจ (สำหรับรายงานตามโจทย์)
         heading = 0  # 0:N, 1:E, 2:S, 3:W
         moves = {0: (0, 1), 1: (1, 0), 2: (0, -1), 3: (-1, 0)}
 
         grid_cfg = self.config.get("grid_map", {})
         MAX_X = grid_cfg.get("max_x", 3)
         MAX_Y = grid_cfg.get("max_y", 3)
-    
+
         goal_cfg = grid_cfg.get("goal", {})
         GOAL_X = goal_cfg.get("x", 3)
         GOAL_Y = goal_cfg.get("y", 0)
@@ -475,11 +476,14 @@ class ChassisController:
                 left_dist = self.prev_irL_cm  # IR 2 (ซ้าย)
 
                 # แจ้งเตือนเมื่อเจอจุด Goal
+                # >>> FIX: เดิมโค้ด 2 บรรทัดนี้ไม่ได้ย่อหน้าอยู่ใต้ if จึงรันทุกลูป
+                #          ทำให้ทุกแถวใน log ถูกบันทึกเป็น GOAL_DISCOVERED (บั๊ก) <<<
                 action_status = "VISIT"
                 if x == GOAL_X and y == GOAL_Y and not goal_reached:
                     print(f"\n=== 🎉 ค้นพบจุด Goal ({GOAL_X}, {GOAL_Y}) แล้ว! ระบบจะเดินสำรวจพื้นที่ส่วนที่เหลือต่อให้ครบ 100% ===")
-                goal_reached = True
-                action_status = "GOAL_DISCOVERED"
+                    goal_reached = True
+                    action_status = "GOAL_DISCOVERED"
+
                 # 💡 บันทึกพิกัดและค่าเซนเซอร์ ณ จุดที่หุ่นยืนอยู่ลง CSV ทันที
                 log_step(
                     x,
@@ -616,6 +620,42 @@ class ChassisController:
             print("\n--> ยกเลิกการสำรวจโดยผู้ใช้")
             self.ep_chassis.drive_speed(x=0, y=0, z=0)
 
+        # =========================================================================
+        # 3. NEW: สรุปรายงาน Start / End position ตามที่โจทย์ต้องการ
+        #    ("เมื่อจบภารกิจต้องรายงานว่า หุ่นยนต์เริ่มต้นที่ไหน และจบที่ไหน")
+        # =========================================================================
+        total_cells = (MAX_X + 1) * (MAX_Y + 1)
+        coverage_pct = round(100.0 * len(visited) / total_cells, 2) if total_cells else 0.0
+
+        report = {
+            "start_grid": [start_x, start_y],
+            "start_real_m": [round(start_x * CELL_SIZE, 3), round(start_y * CELL_SIZE, 3)],
+            "end_grid": [x, y],
+            "end_real_m": [round(x * CELL_SIZE, 3), round(y * CELL_SIZE, 3)],
+            "goal_grid": [GOAL_X, GOAL_Y],
+            "goal_reached": goal_reached,
+            "visited_cells": len(visited),
+            "total_grid_cells": total_cells,
+            "coverage_percent": coverage_pct,
+            "exploration_log_csv": csv_path,
+        }
+
+        report_path = os.path.join(data_dir, f"log_{date_str}_mission_report.json")
+        with open(report_path, "w", encoding="utf-8") as rf:
+            json.dump(report, rf, ensure_ascii=False, indent=2)
+
+        print("\n" + "=" * 60)
+        print("สรุปภารกิจ (Mission Report)")
+        print("=" * 60)
+        print(f"Start : grid={report['start_grid']}  real={report['start_real_m']} m")
+        print(f"End   : grid={report['end_grid']}  real={report['end_real_m']} m")
+        print(f"Goal reached: {goal_reached}  (goal grid={report['goal_grid']})")
+        print(f"Coverage: {report['visited_cells']}/{total_cells} cells = {coverage_pct}%")
+        print(f"บันทึกไว้ที่: {report_path}")
+        print("=" * 60)
+
+        return report
+
     def move_backward(self, distance=None, speed=None):
         if distance is None:
             distance = self.default_distance
@@ -647,25 +687,18 @@ class ChassisController:
     def run_wall_follower(self, forward_speed=0.12, target_dist_cm=16.0, stop_front_mm=220, wall_detect_cm=16.9):
         """
         ระบบเดินเกาะกำแพงซ้ายด้วยการสไลด์ข้าง (Mecanum Strafe - แกน Y)
-        - วิ่งตรงด้วยแกน X และสไลด์แกน Y เพื่อรักษาระยะห่างกำแพงซ้าย (Z = 0)
-        - เมื่อเจอกำแพงหน้า: หมุนเลี้ยวด้วยแกน Z เพื่อหาทางเปิดของซอยถัดไป
-        - เมื่อพบทางตัน (หน้า, ซ้าย, ขวา ติดกำแพงพร้อมกัน): หยุดทำงานทันที
         """
         print("--> เริ่มต้นระบบ Wall Follower (ควบคุมด้วยการสไลด์ข้างแกน Y)...")
 
-        # ค่าเกนสำหรับคำนวณความเร็วสไลด์ข้าง (m/s ต่อ cm ของ Error)
         Kp_y = 0.008
-        MAX_Y_SPEED = 0.08  # จำกัดความเร็วสไลด์ข้างไม่ให้กระชากเกินไป (m/s)
+        MAX_Y_SPEED = 0.08
 
         try:
             while True:
                 tof_dist = getattr(self, "current_tof_dist_mm", 10000)
-                ir_r = self.prev_irR_cm   # IR ด้านขวา
-                ir_l = self.prev_irL_cm   # IR ด้านซ้าย
+                ir_r = self.prev_irR_cm
+                ir_l = self.prev_irL_cm
 
-                # -------------------------------------------------------------
-                # 1. ตรวจสอบทางตันที่จุดหมาย (หน้าตัน + ซ้ายตัน + ขวาตัน)
-                # -------------------------------------------------------------
                 is_front_blocked = (0 < tof_dist <= stop_front_mm)
                 is_right_blocked = (ir_r <= wall_detect_cm)
                 is_left_blocked = (ir_l <= wall_detect_cm)
@@ -675,37 +708,23 @@ class ChassisController:
                     print(f"--> ถึงจุดหมายทางตัน! [หน้า: {tof_dist}mm, ขวา: {ir_r:.1f}cm, ซ้าย: {ir_l:.1f}cm]")
                     break
 
-                # -------------------------------------------------------------
-                # 2. ตรวจพบกำแพงหน้า (เข้ามุมเลี้ยว / ทางหักศอก)
-                # -------------------------------------------------------------
                 if is_front_blocked:
-                    # หมุนตัวเฉพาะตอนติดกำแพงหน้า: ถ้าซ้ายมีกำแพงให้เลี้ยวขวา (z ติดลบ)
                     if ir_r > ir_l:
                         z_turn = 360
                     else:
                         z_turn = -360
-                    
+
                     self.ep_chassis.drive_speed(x=0, y=0, z=z_turn)
                     time.sleep(0.05)
                     continue
 
-                # -------------------------------------------------------------
-                # 3. รักษาระยะกำแพงซ้ายด้วยการสไลด์ข้าง (แกน Y)
-                # -------------------------------------------------------------
                 if is_left_blocked:
-                    # คำนวณ Error:
-                    # - ชิดกำแพงเกินไป (ir_l < target) -> error ติดลบ -> y_speed เป็นบวก (สไลด์ขวาหนีกำแพง)
-                    # - ห่างกำแพงเกินไป (ir_l > target) -> error เป็นบวก -> y_speed เป็นลบ (สไลด์ซ้ายเข้าหากำแพง)
                     error = ir_l - target_dist_cm
                     y_speed = -error * Kp_y
-                    
-                    # ป้องกันการสไลด์เร็วเกินไป
                     y_speed = max(-MAX_Y_SPEED, min(MAX_Y_SPEED, y_speed))
                 else:
                     y_speed = 0.0
 
-
-                # ขับเคลื่อนเดินหน้า (X) พร้อมสไลด์ข้าง (Y) โดยล็อกหัวรถตรง (Z = 0)
                 self.ep_chassis.drive_speed(x=forward_speed, y=y_speed, z=0)
                 time.sleep(0.05)
 
@@ -715,16 +734,13 @@ class ChassisController:
             self.ep_chassis.drive_speed(x=0, y=0, z=0)
             print("--> ปิดระบบ Wall Following เรียบร้อย")
 
-        
-
     def test_movement(self):
         print("--- Starting mobility test ---")
-        
+
         self.auto_drive_general
         time.sleep(0.5)
         self.turn_right()
         time.sleep(0.5)
         self.auto_drive_general
-        
+
         print("--- Movement complete ---")
-        
