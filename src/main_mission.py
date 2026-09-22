@@ -2,19 +2,16 @@
 
 Entry point that actually connects to the robot and runs the full mission:
   1. connect
-  2. start logging all sensors (position / attitude / imu / esc / ToF / IR)
+  2. start logging all sensors (position / attitude / imu / esc / ToF)
   3. run frontier-DFS exploration + mapping (unknown map, self-localized via
-     odometry, walls sensed with ToF + Sharp IR)
+     odometry, walls sensed with ToF + Gimbal scan)
   4. stop logging
   5. print + save the Start/End position report the assignment asks for
-
-This file did not exist before - explore_and_map_all() in chassis.py was
-never actually wired up to a robot connection, so the mission was never run
-end-to-end. Run this on Monday during the test.
 """
 
 import sys
 import os
+import cv2
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -38,16 +35,25 @@ def main():
     chassis.setup_csv_headers()
     chassis.start_sensors()
 
+    report = None
     try:
         report = chassis.explore_and_map_all()
+        
+        # 🟢 ทำให้หน้าต่าง OpenCV Real-time ค้างไว้จนกว่าผู้ใช้จะกดปุ่ม 'q' หรือ Esc เพื่อดูผลลัพธ์สุดท้าย
+        print("\n[+] ภารกิจสำรวจเสร็จสิ้น! กดปุ่ม 'q' หรือ Esc ที่หน้าต่างแผนที่ Grid เพื่อปิดโปรแกรม...")
+        while True:
+            key = cv2.waitKey(100) & 0xFF
+            if key in (ord("q"), 27):  # กด q หรือ ESC
+                break
     finally:
         chassis.stop_sensors()
         ep_robot.close()
 
-    print("\nMission finished.")
-    print(f"Start: {report['start_grid']}  End: {report['end_grid']}")
-    print("Now run analysis/generate_map_report.py to build the Map, Trajectory,")
-    print("and Accuracy/Coverage numbers for submission.")
+    if report:
+        print("\nMission finished.")
+        print(f"Start: {report['start_grid']}   End: {report['end_grid']}")
+        print("Now run analysis/generate_map_report.py to build the Map, Trajectory,")
+        print("and Accuracy/Coverage numbers for submission.")
     return report
 
 

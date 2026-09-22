@@ -36,8 +36,8 @@ lidar_scan:
   max_valid_dist_mm: 10000
 
 grid_map:
-  max_x: 6
-  max_y: 5
+  max_x: 2
+  max_y: 2
   goal:
-    x: 5
-    y: 0
+    x: 2
+    y: 2
