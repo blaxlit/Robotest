@@ -131,8 +131,6 @@ class ChassisController:
     def safe_move_forward(self, distance=0.6, speed=0.3, stop_limit_mm=130):
         """เดินหน้าแบบปลอดภัยโดยใช้ drive_speed ควบคุมด้วยเวลา พร้อมรีเซ็ต Gimbal ก่อนเดิน"""
         print(f"--> [Safe Move] กำลังเดินหน้า {distance}m ด้วย drive_speed...")
-        
-        # รีเซ็ต Gimbal ให้ตรงหน้าก่อนเริ่มขยับรถทุกครั้ง
         self.reset_gimbal()
 
         travel_time = distance / speed
@@ -180,10 +178,10 @@ class ChassisController:
 
         # 4. กลับมาหน้าตรง
         self.reset_gimbal()
-
         return distances
 
     def draw_live_grid(self, current_pos, visited_set, max_x=3, max_y=3):
+        """แสดงตำแหน่งตาราง Grid และตำแหน่งหุ่นแบบ Real-time"""
         cell_px = 120  
         width = (max_x + 1) * cell_px
         height = (max_y + 1) * cell_px
@@ -217,6 +215,7 @@ class ChassisController:
         cv2.waitKey(1)
 
     def explore_and_map_all(self):
+        """อัลกอริทึมสำรวจพื้นที่แบบเต็มรูปแบบ (ไม่พึ่งพา Goal จอดที่ช่องสุดท้ายทันที)"""
         print("--- เริ่มการสำรวจและสร้างแผนที่ (Robust Grid Exploration) ---")
 
         data_cfg = self.config.get("data_collection", {})
@@ -265,12 +264,6 @@ class ChassisController:
         grid_cfg = self.config.get("grid_map", {})
         MAX_X = grid_cfg.get("max_x", 3)
         MAX_Y = grid_cfg.get("max_y", 3)
-        
-        goal_cfg = grid_cfg.get("goal", {})
-        GOAL_X = goal_cfg.get("x", 3)
-        GOAL_Y = goal_cfg.get("y", 0)
-
-        goal_reached = False
 
         try:
             while True:
@@ -282,19 +275,15 @@ class ChassisController:
 
                 self.draw_live_grid((x, y), visited, MAX_X, MAX_Y)
 
+                # สแกนพื้นที่รอบตัว
                 surrounding = self.scan_surroundings_with_gimbal()
                 front_dist = surrounding["front"]
                 right_dist = surrounding["right"]
                 left_dist = surrounding["left"]
 
-                action_status = "VISIT"
-                if x == GOAL_X and y == GOAL_Y and not goal_reached:
-                    goal_reached = True
-                    print(f"\n=== 🎉 ค้นพบเป้าหมาย (Goal) ที่พิกัด ({x}, {y}) แล้ว! ===")
-                    action_status = "GOAL_DISCOVERED"
+                log_step(x, y, heading, front_dist, right_dist, left_dist, act_label="VISIT", c_size=CELL_SIZE)
 
-                log_step(x, y, heading, front_dist, right_dist, left_dist, act_label=action_status, c_size=CELL_SIZE)
-
+                # ตรวจสอบทิศทางที่เปิดอยู่
                 open_dirs = []
                 if front_dist > FRONT_WALL_MM:
                     open_dirs.append(heading)
@@ -311,6 +300,7 @@ class ChassisController:
                         if (target_x, target_y) not in visited:
                             unvisited.append(d)
 
+                # ถ้ามีช่องใหม่ที่ยังไม่เคยไป ให้เดินหน้าไปช่องนั้น
                 if unvisited:
                     next_heading = unvisited[0]
                     stack.append((x, y, heading))
@@ -334,6 +324,7 @@ class ChassisController:
                         print("-> [Obstacle] ชนสิ่งกีดขวาง ยกเลิกเส้นทางนี้")
                         stack.pop()
                 else:
+                    # ถ้าไม่มีช่องใหม่ และ Stack หมด (สำรวจครบหมดแล้ว) -> หยุดทันทีที่ช่องสุดท้าย!
                     if not stack:
                         end_x, end_y = x, y
                         total_cells = (MAX_X + 1) * (MAX_Y + 1)
@@ -347,6 +338,7 @@ class ChassisController:
                         print("="*50 + "\n")
                         break
 
+                    # ถอยกลับไปทางเดิมตาม Stack เพื่อหาช่องอื่นที่อาจยังค้างอยู่
                     prev_x, prev_y, prev_heading = stack.pop()
                     dx = prev_x - x
                     dy = prev_y - y
@@ -380,8 +372,6 @@ class ChassisController:
         report = {
             "start_grid": [start_x, start_y],
             "end_grid": [x, y],
-            "goal_grid": [GOAL_X, GOAL_Y],
-            "goal_reached": goal_reached,
             "visited_cells": len(visited),
             "total_grid_cells": total_cells,
             "coverage_percent": coverage_pct,
@@ -408,4 +398,3 @@ class ChassisController:
         time.sleep(0.3)
         self.ep_chassis.move(x=0, y=0, z=-angle, z_speed=speed).wait_for_completed()
         time.sleep(0.3)
-        #check if the robot is still turning after the command
