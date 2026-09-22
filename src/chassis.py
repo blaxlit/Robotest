@@ -96,6 +96,12 @@ class ChassisController:
         self.ep_chassis.sub_imu(freq=self.freq_imu, callback=self.handle_imu)
         self.ep_chassis.sub_esc(freq=self.freq_esc, callback=self.handle_esc)
         self.ep_sensor.sub_distance(freq=self.freq_dist, callback=self.handle_distance)
+        
+        try:
+            self.ep_gimbal.recenter(pitch_speed=200, yaw_speed=200).wait_for_completed()
+            time.sleep(0.5)
+        except Exception:
+            pass
 
     def stop_sensors(self):
         time.sleep(self.buffer_time)
@@ -107,6 +113,14 @@ class ChassisController:
         cv2.destroyAllWindows()
         print("Data collection and saving to the file have been fully completed.")
 
+    def reset_gimbal(self):
+        """รีเซ็ต Gimbal กลับมาตรงกลางหน้าตรง (Yaw=0, Pitch=0) เพื่อความแม่นยำ"""
+        try:
+            self.ep_gimbal.moveto(pitch=0, yaw=0, yaw_speed=200).wait_for_completed()
+            time.sleep(0.1)
+        except Exception:
+            pass
+
     def move_forward(self, distance=None, speed=None):
         if distance is None:
             distance = self.default_distance
@@ -115,12 +129,12 @@ class ChassisController:
         self.ep_chassis.move(x=distance, y=0, z=0, xy_speed=speed).wait_for_completed()
 
     def safe_move_forward(self, distance=0.6, speed=0.3, stop_limit_mm=130):
-        """
-        เดินหน้าแบบปลอดภัยโดยใช้ drive_speed ควบคุมด้วยเวลา (ตัดปัญหา Action ค้างและ Timeout)
-        """
+        """เดินหน้าแบบปลอดภัยโดยใช้ drive_speed ควบคุมด้วยเวลา พร้อมรีเซ็ต Gimbal ก่อนเดิน"""
         print(f"--> [Safe Move] กำลังเดินหน้า {distance}m ด้วย drive_speed...")
         
-        # คำนวณเวลาที่ใช้ในการเคลื่อนที่ (เวลา = ระยะทาง / ความเร็ว)
+        # รีเซ็ต Gimbal ให้ตรงหน้าก่อนเริ่มขยับรถทุกครั้ง
+        self.reset_gimbal()
+
         travel_time = distance / speed
         start_time = time.time()
         
@@ -128,105 +142,44 @@ class ChassisController:
             while (time.time() - start_time) < travel_time:
                 front_dist = self.current_tof_dist_mm
                 
-                # เช็คเบรกฉุกเฉิน
                 if 0 < front_dist <= stop_limit_mm:
                     print(f"!!! [เบรกฉุกเฉิน] เจอสิ่งกีดขวางระยะ {front_dist}mm หยุดการทำงานทันที !!!")
                     self.ep_chassis.drive_speed(x=0, y=0, z=0)
                     time.sleep(0.5)
-                    return False  # ถือว่าชนหรือติดกำแพง
+                    return False
                 
-                # สั่งเดินหน้าด้วยความเร็วคงที่
                 self.ep_chassis.drive_speed(x=speed, y=0, z=0)
                 time.sleep(0.05)
                 
         except Exception as e:
             print(f"[-] เกิดข้อผิดพลาดในการเคลื่อนที่: {e}")
             
-        # เมื่อครบระยะเวลาที่กำหนด สั่งหยุดนิ่ง
         self.ep_chassis.drive_speed(x=0, y=0, z=0)
-        time.sleep(0.3)
-        return True
-        """เดินหน้าแบบปลอดภัย ป้องกัน Action ค้างและ Timeout เมื่อเกิดเบรกฉุกเฉิน"""
-        print(f"--> [Safe Move] กำลังเดินหน้า {distance}m...")
-        
-        try:
-            action = self.ep_chassis.move(x=distance, y=0, z=0, xy_speed=speed)
-        except Exception as e:
-            print(f"[-] เกิดข้อผิดพลาดในการสั่งเคลื่อนที่: {e}")
-            self.ep_chassis.drive_speed(x=0, y=0, z=0)
-            time.sleep(1.0)
-            return False
-        
-        while not action.is_completed:
-            front_dist = self.current_tof_dist_mm
-            if 0 < front_dist <= stop_limit_mm:
-                print(f"!!! [เบรกฉุกเฉิน] เจอสิ่งกีดขวางระยะ {front_dist}mm หยุดการทำงานทันที !!!")
-                
-                # 1. สั่งหยุดล้อทันที
-                self.ep_chassis.drive_speed(x=0, y=0, z=0)
-                
-                # 2. พยายามยกเลิก action และรอให้ SDK ปล่อยสถานะล็อก
-                try:
-                    action.cancel()
-                except Exception:
-                    pass
-                
-                # 3. หน่วงเวลารอให้หุ่นเคลียร์คิวคำสั่งเก่า (สำคัญมาก ป้องกัน timeout!)
-                start_wait = time.time()
-                while not action.is_completed and (time.time() - start_wait) < 2.0:
-                    time.sleep(0.1)
-                
-                time.sleep(0.5)
-                return False
-                
-            time.sleep(0.05)
-
-        time.sleep(0.3)
-        return True
-        """เดินหน้าพร้อมระบบป้องกัน Action ค้าง และเบรกฉุกเฉิน ToF"""
-        print(f"--> [Safe Move] กำลังเดินหน้า {distance}m...")
-        
-        try:
-            action = self.ep_chassis.move(x=distance, y=0, z=0, xy_speed=speed)
-        except Exception as e:
-            print(f"[-] เกิดข้อผิดพลาดในการสั่งเคลื่อนที่: {e}")
-            self.ep_chassis.drive_speed(x=0, y=0, z=0)
-            time.sleep(1.0)
-            return False
-        
-        while not action.is_completed:
-            front_dist = self.current_tof_dist_mm
-            if 0 < front_dist <= stop_limit_mm:
-                print(f"!!! [เบรกฉุกเฉิน] เจอสิ่งกีดขวางระยะ {front_dist}mm หยุดการทำงานทันที !!!")
-                self.ep_chassis.drive_speed(x=0, y=0, z=0)
-                try:
-                    action.cancel()
-                except Exception:
-                    pass
-                time.sleep(0.8)  # หน่วงเวลารอให้ SDK เคลียร์สถานะ Action ค้าง
-                return False
-            time.sleep(0.05)
-
         time.sleep(0.3)
         return True
 
     def scan_surroundings_with_gimbal(self):
+        """ใช้ Gimbal หมุนสแกนระยะ ToF หน้า ขวา ซ้าย (รีเซ็ตก่อนและหลังสแกนเสมอ)"""
+        self.reset_gimbal()
         distances = {"front": 0, "right": 0, "left": 0}
         
+        # 1. ด้านหน้า
         self.ep_gimbal.moveto(pitch=0, yaw=0, yaw_speed=150).wait_for_completed()
         time.sleep(0.15)
         distances["front"] = self.current_tof_dist_mm
 
+        # 2. ด้านขวา
         self.ep_gimbal.moveto(pitch=0, yaw=90, yaw_speed=150).wait_for_completed()
         time.sleep(0.15)
         distances["right"] = self.current_tof_dist_mm
 
+        # 3. ด้านซ้าย
         self.ep_gimbal.moveto(pitch=0, yaw=-90, yaw_speed=150).wait_for_completed()
         time.sleep(0.15)
         distances["left"] = self.current_tof_dist_mm
 
-        self.ep_gimbal.moveto(pitch=0, yaw=0, yaw_speed=150).wait_for_completed()
-        time.sleep(0.15)
+        # 4. กลับมาหน้าตรง
+        self.reset_gimbal()
 
         return distances
 
@@ -435,13 +388,6 @@ class ChassisController:
             "exploration_log_csv": csv_path,
         }
         return report
-
-    def move_backward(self, distance=None, speed=None):
-        if distance is None:
-            distance = self.default_distance
-        if speed is None:
-            speed = self.default_speed
-        self.ep_chassis.move(x=-distance, y=0, z=0, xy_speed=speed).wait_for_completed()
 
     def turn_left(self, angle=None, speed=None):
         if angle is None:
