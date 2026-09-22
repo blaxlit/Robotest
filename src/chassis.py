@@ -408,3 +408,4 @@ class ChassisController:
         time.sleep(0.3)
         self.ep_chassis.move(x=0, y=0, z=-angle, z_speed=speed).wait_for_completed()
         time.sleep(0.3)
+        #check if the robot is still turning after the command
