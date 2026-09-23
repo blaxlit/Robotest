@@ -36,8 +36,11 @@ lidar_scan:
   max_valid_dist_mm: 10000
 
 grid_map:
-  max_x: 2
-  max_y: 2
-  goal:
-    x: 2
-    y: 2
+  max_x: 3
+  max_y: 4
+  start:             # 🟢 เพิ่มค่าเริ่มต้นตรงนี้ (เช่น วางหุ่นที่ช่องไหนก็ใส่ x, y นั้น)
+    x: 0
+    y: 0
+  # goal:
+  #   x: 
+  #   y: 

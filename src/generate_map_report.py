@@ -1,25 +1,14 @@
 """Class Work 8 - SLAM: Explore the Unknown World.
 
 Builds the 3 deliverables that depend on the exploration log:
-  - Map            : occupancy-grid PNG (visited cells + sensed walls)
+  - Map             : occupancy-grid PNG (visited cells + sensed walls)
   - Robot Trajectory: PNG of the real (x, y) path with start/end marked
   - Accuracy report : Map Accuracy % and Coverage % (per the formulas in the
-                       assignment) + a printed Start/End position report
-
-Unlike the old analysis/analyze_logs.py, this script does NOT hardcode any
-walls or a "standard_sequence" fallback path. It only ever draws what the
-robot's own ToF + Sharp IR readings actually measured during exploration, so
-each group's differing maze produces a differing map, as required.
+                      assignment) + a printed Start/End position report
 
 Usage:
     python analysis/generate_map_report.py
     python analysis/generate_map_report.py --log path/to/log_..._exploration_map_data.csv
-
-Ground truth for Map Accuracy:
-    You only get the real maze layout AFTER Monday's test. Edit
-    GROUND_TRUTH_FREE_CELLS below (or pass --ground-truth-json) once you know
-    it, then re-run this script to get the real Map Accuracy number. Until
-    then it defaults to "all cells traversable", so Map Accuracy == Coverage.
 """
 
 import argparse
@@ -32,15 +21,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
-from config_loader import load_config  # noqa: E402
+try:
+    from config_loader import load_config
+except ImportError:
+    def load_config():
+        return {}
 
 
 # ---------------------------------------------------------------------------
 # EDIT THIS after the real maze is revealed on test day, to get true
 # Map Accuracy instead of the "assume everything is free" placeholder.
-# Format: set of (grid_x, grid_y) tuples that are actually traversable
-# floor cells in the real maze. Leave as None to assume every cell in the
-# configured grid (max_x+1) x (max_y+1) is traversable.
 # ---------------------------------------------------------------------------
 GROUND_TRUTH_FREE_CELLS = None
 
@@ -53,19 +43,23 @@ def get_latest_file(data_dir, pattern):
 
 
 def classify_wall(distance, open_above):
-    """True == wall present."""
-    if distance is None:
+    """True == wall present, False == open, None == invalid."""
+    if distance is None or pd.isna(distance):
+        return None
+    # กรองกรณีอ่านค่าหลุดหรือ ToF return 0
+    if distance <= 0:
         return None
     return not (distance > open_above)
 
 
-def build_wall_votes(df):
+def build_wall_votes(df, wall_threshold_cm=38.0):
     """direction vote counting per cell, from every row that visited it.
 
     direction index: 0=N(+y) 1=E(+x) 2=S(-y) 3=W(-x), matches chassis.py.
-    front sensor covers `heading`, right sensor covers (heading+1)%4,
-    left sensor covers (heading+3)%4 - same mapping explore_and_map_all()
-    uses to decide which directions are open.
+    - front sensor covers `heading`
+    - right sensor covers `(heading + 1) % 4`
+    - back sensor covers `(heading + 2) % 4`  (เพิ่มใหม่)
+    - left sensor covers `(heading + 3) % 4`
     """
     votes = {}  # (gx,gy) -> {dir: [wall_votes, open_votes]}
 
@@ -76,13 +70,34 @@ def build_wall_votes(df):
         d[direction][0 if is_wall else 1] += 1
 
     for _, row in df.iterrows():
+        # ข้ามแถว RETRACE เพราะค่าเซนเซอร์ไม่ได้มาจากการสแกนจริงรอบตัว
+        if str(row.get("action", "")).strip().upper() == "RETRACE":
+            continue
+
         cell = (int(row["grid_x"]), int(row["grid_y"]))
         h = int(row["heading"])
-        front_wall = classify_wall(row["front_tof_mm"], 300)
-        right_wall = classify_wall(row["right_ir_cm"], 20.0)
-        left_wall = classify_wall(row["left_ir_cm"], 20.0)
+
+        # 1. Front (mm -> cm หรือเทียบ mm ด้วยเกณฑ์ 380 mm)
+        front_val_mm = row.get("front_tof_mm")
+        front_wall = classify_wall(front_val_mm, wall_threshold_cm * 10)
+
+        # 2. Right (cm)
+        right_val_cm = row.get("right_ir_cm")
+        right_wall = classify_wall(right_val_cm, wall_threshold_cm)
+
+        # 3. Back (cm) - ตรวจสอบทิศด้านหลัง (heading + 2) % 4
+        back_val_cm = row.get("back_ir_cm")
+        if pd.isna(back_val_cm) and "back_tof_mm" in row:
+            back_val_cm = row["back_tof_mm"] / 10.0
+        back_wall = classify_wall(back_val_cm, wall_threshold_cm)
+
+        # 4. Left (cm)
+        left_val_cm = row.get("left_ir_cm")
+        left_wall = classify_wall(left_val_cm, wall_threshold_cm)
+
         add_vote(cell, h, front_wall)
         add_vote(cell, (h + 1) % 4, right_wall)
+        add_vote(cell, (h + 2) % 4, back_wall)
         add_vote(cell, (h + 3) % 4, left_wall)
 
     walls = {}
@@ -95,7 +110,7 @@ def build_wall_votes(df):
     return walls
 
 
-def plot_map(df, walls, max_x, max_y, goal, start_cell, end_cell, out_path):
+def plot_map(df, walls, max_x, max_y, start_cell, end_cell, out_path):
     fig, ax = plt.subplots(figsize=(max(6, max_x + 2), max(6, max_y + 2)))
 
     visited = {(int(r["grid_x"]), int(r["grid_y"])) for _, r in df.iterrows()}
@@ -121,8 +136,6 @@ def plot_map(df, walls, max_x, max_y, goal, start_cell, end_cell, out_path):
 
     ax.plot(*start_cell, marker="s", color="#2CA02C", markersize=14, label="start", zorder=6)
     ax.plot(*end_cell, marker="o", color="#D62728", markersize=12, label="end", zorder=6)
-    ax.plot(goal[0], goal[1], marker="*", color="#FFB300", markersize=16,
-            markeredgecolor="black", label="goal", zorder=6)
 
     ax.set_xticks(range(max_x + 1))
     ax.set_yticks(range(max_y + 1))
@@ -180,14 +193,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", default=None, help="Path to exploration_map_data csv (default: latest in data_dir)")
     parser.add_argument("--ground-truth-json", default=None,
-                         help='JSON file with a list of [x,y] free cells, e.g. [[0,0],[0,1],...]')
+                        help='JSON file with a list of [x,y] free cells, e.g. [[0,0],[0,1],...]')
+    parser.add_argument("--threshold", type=float, default=38.0,
+                        help="Threshold distance in cm to classify as open vs wall (default: 38.0)")
     args = parser.parse_args()
 
     config = load_config()
     grid_cfg = config.get("grid_map", {})
     max_x = grid_cfg.get("max_x", 3)
     max_y = grid_cfg.get("max_y", 3)
-    goal = (grid_cfg.get("goal", {}).get("x", 3), grid_cfg.get("goal", {}).get("y", 0))
     cell_size = config.get("movement", {}).get("distance", 0.6)
     data_dir = config.get("data_collection", {}).get("data_dir", "data/raw/run1")
 
@@ -207,9 +221,13 @@ def main():
 
     visited = {(int(r["grid_x"]), int(r["grid_y"])) for _, r in df.iterrows()}
     start_cell = (int(df.iloc[0]["grid_x"]), int(df.iloc[0]["grid_y"]))
-    end_cell = (int(df.iloc[-1]["grid_x"]), int(df.iloc[-1]["grid_y"]))
 
-    walls = build_wall_votes(df)
+    non_retrace = df[df["action"] != "RETRACE"]
+    last_real_row = non_retrace.iloc[-1] if not non_retrace.empty else df.iloc[-1]
+    end_cell = (int(last_real_row["grid_x"]), int(last_real_row["grid_y"]))
+
+    # สร้างข้อมูลกำแพงโดยใช้ threshold ที่รองรับกริด 0.6m
+    walls = build_wall_votes(df, wall_threshold_cm=args.threshold)
 
     ground_truth_free_cells = GROUND_TRUTH_FREE_CELLS
     if args.ground_truth_json:
@@ -222,7 +240,7 @@ def main():
 
     map_png = os.path.join(data_dir_abs, "slam_map.png")
     traj_png = os.path.join(data_dir_abs, "slam_trajectory.png")
-    plot_map(df, walls, max_x, max_y, goal, start_cell, end_cell, map_png)
+    plot_map(df, walls, max_x, max_y, start_cell, end_cell, map_png)
     plot_trajectory(df, start_cell, end_cell, cell_size, traj_png)
 
     report = {

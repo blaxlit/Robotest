@@ -1,5 +1,5 @@
 {
-  "log_file": "c:\\Users\\lenovo\\Documents\\GitHub\\RoboFinal\\data/raw/run1\\log_20260922_exploration_map_data.csv",
+  "log_file": "c:\\Users\\lenovo\\Documents\\GitHub\\RoboFinal\\data/raw/run1\\log_20260923_exploration_map_data.csv",
   "start_grid": [
     0,
     0
@@ -10,16 +10,16 @@
   ],
   "end_grid": [
     0,
-    0
+    3
   ],
   "end_real_m": [
     0.0,
-    0.0
+    1.8
   ],
-  "visited_cells": 9,
-  "total_cells": 9,
-  "coverage_percent": 100.0,
-  "map_accuracy_percent": 100.0,
+  "visited_cells": 19,
+  "total_cells": 20,
+  "coverage_percent": 95.0,
+  "map_accuracy_percent": 95.0,
   "ground_truth_used": false,
   "map_image": "c:\\Users\\lenovo\\Documents\\GitHub\\RoboFinal\\data/raw/run1\\slam_map.png",
   "trajectory_image": "c:\\Users\\lenovo\\Documents\\GitHub\\RoboFinal\\data/raw/run1\\slam_trajectory.png"
