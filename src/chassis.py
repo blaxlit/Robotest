@@ -135,53 +135,50 @@ class ChassisController:
             speed = self.default_speed
         self.ep_chassis.move(x=distance, y=0, z=0, xy_speed=speed).wait_for_completed()
 
-    def safe_move_forward(self, distance=0.6, speed=0.3, stop_limit_mm=200):
-        print(f"--> [Safe Move] กำลังเดินหน้า {distance}m ด้วย drive_speed...")
+    def safe_move_forward(self, distance=0.6, speed=0.3, stop_limit_mm=100):
+        """เดินหน้าแบบปลอดภัย: ไม่มีการถอยหลัง และหากเดินใกล้ครบระยะแล้วเจอกำแพงหน้าช่องใหม่ ให้นับว่าสำเร็จ"""
+        print(f"--> [Safe Move] กำลังเดินหน้า {distance}m ด้วยความเร็ว {speed}m/s...")
         self.reset_gimbal()
 
-        start_pos_x, start_pos_y = self.pos_x, self.pos_y
         travel_time = distance / speed
         start_time = time.time()
-
-        hit_obstacle = False
+        hit_early_obstacle = False
+        
         try:
             while (time.time() - start_time) < travel_time:
                 front_dist = self.current_tof_dist_mm
-                if 0 < front_dist <= stop_limit_mm:
-                    print(f"!!! [เบรกฉุกเฉิน] เจอสิ่งกีดขวางระยะ {front_dist}mm หยุดการทำงานทันที !!!")
-                    hit_obstacle = True
-                    break
+                elapsed = time.time() - start_time
+                progress = (elapsed * speed) / distance
 
+                # ถ้าเจอกำแพงประชิดตัวจริง ๆ (< 100mm)
+                if 0 < front_dist <= stop_limit_mm:
+                    self.ep_chassis.drive_speed(x=0, y=0, z=0)
+                    time.sleep(0.3)
+                    
+                    # ถ้าเดินมาได้เกิน 80% ของช่องแล้ว แปลว่าเข้ามาถึงช่องใหม่เรียบร้อยแล้ว
+                    if progress >= 0.80:
+                        print(f"-> [ถึงเป้าหมาย] ถึงช่องใหม่แล้ว (พบกำแพงหน้าช่องใหม่ที่ระยะ {front_dist}mm)")
+                        return True
+                    else:
+                        print(f"!!! [สิ่งกีดขวางไม่คาดคิด] ระยะ {front_dist}mm กลางทาง หยุดเดินหน้าทันที !!!")
+                        hit_early_obstacle = True
+                        return False
+                
                 self.ep_chassis.drive_speed(x=speed, y=0, z=0)
                 time.sleep(0.05)
-
+                
         except Exception as e:
             print(f"[-] เกิดข้อผิดพลาดในการเคลื่อนที่: {e}")
-
-        elapsed = time.time() - start_time
+            
         self.ep_chassis.drive_speed(x=0, y=0, z=0)
         time.sleep(0.3)
-
-        if hit_obstacle:
-            pos_based = math.hypot(self.pos_x - start_pos_x, self.pos_y - start_pos_y)
-            time_based = min(speed * elapsed, distance)
-            traveled = max(pos_based, time_based)
-            if traveled > 0.02:
-                print(f"-> ถอยกลับ {traveled:.2f}m เพื่อคืนตำแหน่งให้ตรงกับ grid cell เดิม")
-                try:
-                    self.ep_chassis.move(x=-traveled, y=0, z=0, xy_speed=0.2).wait_for_completed()
-                except Exception as e:
-                    print(f"[-] ถอยกลับไม่สำเร็จ: {e}")
-            return False
-
-        return True
+        return not hit_early_obstacle
 
     def scan_surroundings_with_gimbal(self):
         """ใช้ Gimbal หมุนสแกนระยะ ToF ครบ 4 ทิศรอบตัว 360° (หน้า, ขวา, หลัง, ซ้าย)"""
         self.reset_gimbal()
         distances = {"front": 0, "right": 0, "back": 0, "left": 0}
 
-        # สแกนเรียงลำดับ: หน้า (0°) -> ขวา (90°) -> หลัง (180°) -> ซ้าย (-90°)
         scan_sequence = (
             ("front", 0),
             ("right", 90),
@@ -261,7 +258,6 @@ class ChassisController:
         filename_key = files_cfg.get("exploration", "exploration_map_data")
         csv_path = os.path.join(data_dir, f"log_{date_str}_{filename_key}.csv")
 
-        # เพิ่มคอลัมน์ back_ir_cm เพื่อบันทึกระยะทิศด้านหลัง
         with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -327,9 +323,8 @@ class ChassisController:
 
                 self._live_ctx = ((x, y), visited, MAX_X, MAX_Y, heading)
                 self.draw_live_grid((x, y), visited, MAX_X, MAX_Y,
-                                     gimbal_abs_deg={0: 0, 1: 90, 2: 180, 3: 270}.get(heading, 0))
+                                   gimbal_abs_deg={0: 0, 1: 90, 2: 180, 3: 270}.get(heading, 0))
 
-                # สแกนครบ 4 ด้าน
                 surrounding = self.scan_surroundings_with_gimbal()
                 front_dist = surrounding["front"]
                 right_dist = surrounding["right"]
@@ -342,7 +337,6 @@ class ChassisController:
                     print_summary(x, y)
                     break
 
-                # ตรวจสอบเส้นทางเปิดทั้ง 4 ทิศ (หน้า, ขวา, ซ้าย, หลัง)
                 open_dirs = []
                 if front_dist > FRONT_WALL_MM:
                     open_dirs.append(heading)
@@ -381,7 +375,7 @@ class ChassisController:
                         y += moves[next_heading][1]
                         heading = next_heading
                     else:
-                        print("-> [Obstacle] ชนสิ่งกีดขวาง ยกเลิกเส้นทางนี้ (ตำแหน่งจริงถูกคืนกลับแล้ว)")
+                        print("-> [Obstacle] ชนสิ่งกีดขวางกลางทาง ยกเลิกเส้นทางนี้")
                         stack.pop()
                 else:
                     if not stack:
@@ -409,7 +403,6 @@ class ChassisController:
                     x, y = prev_x, prev_y
                     heading = target_heading
 
-                    # ปรับให้ส่งค่า 4 ทิศครบถ้วนในสเต็ป Retrace
                     log_step(x, y, heading, self.current_tof_dist_mm, 300.0, 300.0, 300.0, act_label="RETRACE", c_size=CELL_SIZE)
 
         except KeyboardInterrupt:
