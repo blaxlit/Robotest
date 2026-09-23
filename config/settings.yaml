@@ -7,7 +7,7 @@ data_collection:
     position: "position_data"
     attitude: "attitude_data"
     imu: "idle_imu_data"
-    esc: "esc_data.csv"
+    esc: "esc_data"
     distance: "tof_data"
     infrared: "ir_data"
     lidar: "gimbal_lidar_data"
@@ -22,13 +22,13 @@ data_collection:
   buffer_time: 0.5   # Wait time before closing (seconds)
 
 movement:
-  xy_speed: 0.5     # Forward/Reverse Speed ​​(m/s)
+  xy_speed: 0.5     # Forward/Reverse Speed (m/s)
   distance: 0.6      # Forward/backward travel distance (m)
   z_speed: 90        # Rotation speed (degrees/second)
   angle: 90          # Initial turning angle (e.g., 90 degrees)
 
 lidar_scan:
-  start_yaw: -75             
+  start_yaw: -75
   end_yaw: 75
   yaw_speed: 25
   pitch: 0
@@ -42,5 +42,5 @@ grid_map:
     x: 0
     y: 0
   # goal:
-  #   x: 
-  #   y: 
+  #   x:
+  #   y:
