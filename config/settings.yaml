@@ -39,9 +39,9 @@ movement:
   
   # --- CHANGED: movement style ---
   strafe_moves: true        # false = turn the chassis to each way first (the old way)
-  cell_speed: 0.30          # m/s for a one-block move (Dhai_8 uses 0.28; 0.45 hit the front IR 6 times)
+  cell_speed: 0.35          # m/s for a one-block move (Dhai_8 uses 0.28; 0.45 hit the front IR 6 times)
   front_stop_mm: 200        # inflated hard stop; do not assume an arbitrary object is a maze wall
-  unknown_cell_speed: 0.25  # first entry into a cell: leave braking margin for arbitrary obstacles
+  unknown_cell_speed: 0.30  # first entry into a cell: leave braking margin for arbitrary obstacles
   reaction_time_s: 0.10     # sensor + control reaction allowance used by the braking-speed limit
   tof_stale_s: 0.35         # stop if no recent valid navigation range arrives
   clearance_scan_deg: 15    # before an unproven move, check left/centre/right of its corridor
@@ -67,7 +67,7 @@ movement:
     center_in_cell_s: 1.0   # after arriving: centre in place for up to this long (stops once centred)
     fine_turn_tol_deg: 1.0  # after a turn: correct until within this, 3 readings in a row
   
-  slide_speed: 0.28         # m/s sideways (no front IR that way) - forward uses cell_speed
+  slide_speed: 0.35         # m/s sideways (no front IR that way) - forward uses cell_speed
   
   # --- CHANGED: sweep_scan ---
   sweep_scan: true          # scan = one continuous gimbal sweep, ToF sampled on the way; still looks only where a card colour showed
@@ -216,7 +216,7 @@ vision:
   max_ring_fill: 0.25       # same colour all around the blob = wall / tape, not a card
   behind_wall_margin_m: 0.15  # further than the ToF wall that way (+ this) = behind the wall
   min_observations: 2       # scan stops that must see a target before it counts
-  round_shape_min_observations: 3  # circles/squares need extra evidence; far circles can look boxy
+  round_shape_min_observations: 2  # circles/squares need extra evidence; far circles can look boxy
   # --- ignore the room around the arena (people, tables, chairs, yellow walls) ---
   ignore_above_wall: true   # nothing above the top of the white foam walls (+ floor) is a card
   wall_s_max: 60            # foam wall / floor pixels: saturation at most this ...
@@ -285,10 +285,10 @@ shooting:
   # เหมาเป้ายิงและใช้ระบบ Snap & Flick
   order: fastest            # global least-time route; one stop may shoot several targets
   max_shot_view_deg: 55     # ... and seen at most this slanted; otherwise go into its block, camera down, and shoot
-  mop_up_round1: true       # end of round 1: drive next to found-but-not-hit cards and shoot them
+  mop_up_round1: false       # end of round 1: drive next to found-but-not-hit cards and shoot them
   queue_detour_moves: 0     # shoot when already in reach; otherwise batch targets in the fastest route
   
-  retry_missed: true        # end of round 1, time left: one more go at cards still standing after max shots
+  retry_missed: false        # end of round 1, time left: one more go at cards still standing after max shots
   second_look_edge_on: true # end of exploring: look from the front at cards seen only nearly edge-on (not mapped)
   aim_center_frac: 0.2      # lock window = this share of the card's size in the picture (aim at its middle) ...
   aim_tolerance_min_deg: 0.6  # ... never tighter than this, never wider than aim_tolerance_deg
